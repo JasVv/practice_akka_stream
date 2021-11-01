@@ -1,0 +1,2 @@
+# Routes
+GET     /                           controllers.HomeController.get
