@@ -58,6 +58,7 @@ class BasicsAndWorkingWithFlowsSpec extends PlaySpec
       // Flowは1つの入力と1つの出力を持つ
       // 型パラメータ1つめは入力される値の型、2つめは出力される値の型、3つめは実行時に返すマテリアライズされた値の型
       val flow: Flow[Int, Int, NotUsed] = Flow.fromFunction(_ * 2)
+      // Flow[Int].map(_ * 2)も同じ
 
       // flowは単体では実行できず、実行するときはSourceとSinkを結合する必要がある
       val source: Source[Int, NotUsed] = Source(1 to 10)
@@ -68,10 +69,52 @@ class BasicsAndWorkingWithFlowsSpec extends PlaySpec
       Await.result(res1, Duration.Inf) mustBe 110
 
       // source.via(flow).toMat(sink)(Keep.both).run()と等価
-      // よって戻り値はsourceとsinkのマテリアライズされた値のTuple
+      // Keep.bothなので戻り値はsourceとsinkのマテリアライズされた値のTuple
       val res2 = flow.runWith(source, sink)
       assert(res2._1.isInstanceOf[NotUsed])
       Await.result(res2._2, Duration.Inf) mustBe 110
+
+      Flow[Int].map(_ * 2)
+    }
+
+    "タスクの分割" in {
+      val source = Source(1 to 5)
+      val sink = Sink.fold[Int, Int](0)(_ + _)
+
+      // タスクの分割をしない場合、Streamを1アクター(1CPUコア)で処理するため、A1とB1は並列処理にはならない
+      // よって以下の例では A1:B1:A1:B1:A1:B1:A1:B1:A1:B1: のように交互に処理される
+      val res1 = source
+        .map { i =>
+          print("A1:")
+          i + 1
+        }
+        .map { i =>
+          print("B1:")
+          i * 2
+        }
+        .toMat(sink)(Keep.right)
+        .run()
+
+      Await.result(res1, Duration.Inf) mustBe 40
+
+      println()
+
+      // asyncによって、「asyncまでの処理」と「asyncの後の処理」をそれぞれ別アクター(別CPUコア)で並列処理できる
+      // 以下の例では A2とB2はそれぞれ独立して行われるため、print結果は A2:A2:A2:A2:B2:A2:B2:B2:B2:B2: のように、A2とB2が交互に現れない形になる
+      val res2 = source
+        .map { i =>
+          print("A2:")
+          i + 1
+        }
+        .async
+        .map { i =>
+          print("B2:")
+          i * 2
+        }
+        .toMat(sink)(Keep.right)
+        .run()
+
+      Await.result(res2, Duration.Inf) mustBe 40
     }
   }
 }
